@@ -5,9 +5,7 @@ import logging
 from rich.logging import RichHandler
 
 from caption_pipeline.caption_pipeline import run_caption_pipeline, CaptionRewrite
-from caption_pipeline.batch import run_caption_batch
 from ocr_pipeline.pipeline import run_pdf_pipeline
-from ocr_pipeline.batch import run_batch
 import quiet
 
 app = typer.Typer(help="PDF --> images --> DeepSeek-OCR --> Markdown --> DeepSeek-VL2 --> Markdown w/ Image captions")
@@ -61,32 +59,6 @@ def pdf_to_md(
 
     logging.getLogger("pdfscribe2ds").info("Job completed! PDF processed --> %s", output_dir)
 
-@app.command("pdf-batch")
-def batch_pdfs(
-    pdf_dir: Path = typer.Argument(..., exists=True, readable=True, file_okay=False, help="Directory containing PDF files"),
-    output_dir: Path = typer.Option(Path("./outputs"), help="Root output directory"),
-    model_name: str = typer.Option("deepseek-ai/DeepSeek-OCR", help="DeepSeek-OCR model name"),
-    dpi: int = typer.Option(200, help="DPI for pdf2image"),
-    num_processes: int = typer.Option(None, help="Number of processes for parallel PDF conversion (per file)"),
-    num_threads: int = typer.Option(None, help="Number of threads for parallel image saving (per file)"),
-    log_level: str = typer.Option("INFO", help="Logging level (DEBUG, INFO, WARNING, ERROR)"),
-) -> None:
-    """
-    Run the PDF -> MD pipeline for every PDF found in pdf_dir in a batch mode.
-    Each PDF gets its own subdirectory under output_dir.
-    Model is initialized ONCE and reused.
-    """
-    setup_logging(log_level.upper())
-
-    run_batch(
-        pdf_dir=pdf_dir,
-        output_dir=output_dir,
-        model_name=model_name,
-        dpi=dpi,
-        num_processes=num_processes,
-        num_threads=num_threads,
-    )
-
 @app.command("caption")
 def caption_md(
     output_dir: Path = typer.Argument(..., exists=True, readable=True, file_okay=False, help="Root output dir that contains markdown/ and images/"),
@@ -113,36 +85,6 @@ def caption_md(
     )
 
     logging.getLogger("pdfscribe2ds").info("Captioning completed! --> %s", output_dir)
-
-@app.command("caption-batch")
-def caption_batch(
-    outputs_root: Path = typer.Argument(..., exists=True, readable=True, file_okay=False,
-                                        help="Root dir that contains many finished PDF outputs (each has markdown/)"),
-    caption_model: str = typer.Option("deepseek-ai/deepseek-vl2-tiny", help="DeepSeek VL2 model for captioning"),
-    gpu_mem: float = typer.Option(0.7, help="GPU memory utilization for vLLM (0-1)"),
-    seed: int = typer.Option(None, help="Optional RNG seed"),
-    prompt: str = typer.Option(None, help="Override the default caption instruction"),
-    rewrite: CaptionRewrite = typer.Option(CaptionRewrite.APPEND, case_sensitive=False,
-                                           help="APPEND: keep image and add caption; REPLACE: replace image tag"),
-    log_level: str = typer.Option("INFO", help="Logging level (DEBUG, INFO, WARNING, ERROR)"),
-) -> None:
-    """
-    Caption images for ALL finished PDF outputs under outputs_root.
-    Each subdirectory must contain a 'markdown/' folder with page .md files.
-    Model is initialized ONCE and reused.
-    """
-    setup_logging(log_level.upper())
-
-    run_caption_batch(
-        outputs_root=outputs_root,
-        caption_model=caption_model,
-        gpu_mem=gpu_mem,
-        seed=seed,
-        prompt=prompt,
-        rewrite=rewrite,
-    )
-
-    logging.getLogger("pdfscribe2ds").info("Caption batch completed! --> %s", outputs_root)
 
 if __name__ == "__main__":
     app()
