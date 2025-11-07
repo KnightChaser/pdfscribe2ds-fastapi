@@ -28,6 +28,6 @@ When the FastAPI service is up, you can try the functionality of the service by 
 ```sh
 curl -f -X POST \
   -F "file=@./example/investment_report.pdf;type=application/pdf" \
-  "http://localhost:8000/v1/process/pdf?rewrite_mode=append&wait_if_busy=true&timeout_s=60" \
+  "http://localhost:8000/v1/process/pdf?rewrite_mode=append&" \
   -o out.zip
 ```

@@ -7,7 +7,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Query
 from fastapi.responses import FileResponse
 from caption_pipeline.caption_pipeline import CaptionRewrite
 
-from service.model_manager import get_engines, engines_busy
+from service.model_manager import get_engines, engines_busy, try_admit_now, try_admit_with_timeout
 from service.pipeline import process_pdf
 from service.workers import zip_dir
 
@@ -62,8 +62,12 @@ async def process_pdf_endpoint(
     dpi: int = 200,
     rewrite_mode: str = "append",
     seed: int | None = None,
-    wait_if_busy: bool = Query(True, description="Wait for GPU slot if busy"), # NOTE: Recommended value is True
-    timeout_s: float = Query(0.0, ge=0.0, le=600.0, description="Max seconds to wait if busy"),
+    wait_if_busy: bool = Query(
+        False, 
+        description="If false, reject the request immediately when another job is running"),
+    timeout_s: float = Query(
+        0.0, ge=0.0, le=600.0, 
+        description="Max seconds to wait if busy (only used when wait_if_busy=True)"),
 ) -> FileResponse:
     """
     Process an uploaded PDF file and return a ZIP archive of the results.
@@ -87,22 +91,20 @@ async def process_pdf_endpoint(
         raise HTTPException(status_code=400, detail="Empty file uploaded.")
 
     # Admission policy
-    if not wait_if_busy and engines_busy():
-        raise HTTPException(
-            status_code=429, # Too Many Requests
-            detail="GPU is busy with another PDF processing request; try again shortly.",
-            headers={"Retry-After": "15"}
-        )
-
     if not wait_if_busy:
-        # NOTE:
-        # Even though the wait_if_busy is set False, at least we have to
-        # verify the GPU overload guardrail.
-        ok = await _try_admit(timeout_s=timeout_s)
+        ok = await try_admit_now()
         if not ok:
             raise HTTPException(
                 status_code=429,
-                detail=f"GPU stayed busy for {timeout_s:.1f}s; try again later.",
+                detail="GPU is busy with another PDF processing request; try again shortly",
+                headers={"Retry-After": "15"},
+            )
+    else:
+        ok = await try_admit_with_timeout(timeout_s=timeout_s)
+        if not ok:
+            raise HTTPException(
+                status_code=503,
+                detail=f"GPU is still busy after waiting for {timeout_s:.1f} seconds; try again later",
                 headers={"Retry-After": "30"},
             )
 

@@ -110,3 +110,45 @@ def engines_busy() -> bool:
     """
     e = get_engines()
     return e.gate._value == 0
+
+async def try_admit_now() -> bool:
+    """
+    Try to admit a new GPU job without waiting.
+
+    Returns:
+        bool: True if admitted, False if the gate is full.
+    """
+    e = get_engines()
+    try:
+        # NOTE:
+        # Non-blocking probe via near-zero timeout
+        # If I set timeout=0, it always raises TimeoutError immediately,
+        # even though the resource is available. At least we have to give
+        # a minimal, trivail amount of time for the event loop to schedule.
+        await asyncio.wait_for(e.gate.acquire(), timeout=0.1)
+    except asyncio.TimeoutError:
+        return False
+    else:
+        # Immediately release after acquiring
+        e.gate.release()
+        return True
+
+async def try_admit_with_timeout(timeout_s: float) -> bool:
+    """
+    Try to admit a new GPU job with a timeout.
+
+    Args:
+        timeout_s (float): Timeout in seconds to wait for admission.
+
+    Returns:
+        bool: True if admitted within the timeout, False otherwise.
+    """
+    e = get_engines()
+    try:
+        await asyncio.wait_for(e.gate.acquire(), timeout=timeout_s)
+    except asyncio.TimeoutError:
+        return False
+    else:
+        # Immediately release after acquiring
+        e.gate.release()
+        return True
