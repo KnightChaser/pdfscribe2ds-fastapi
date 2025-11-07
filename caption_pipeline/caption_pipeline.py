@@ -125,7 +125,9 @@ def caption_markdown_file(
 
 def run_caption_pipeline(
     output_dir: Path,
-    caption_model: str = "deepseek-ai/deepseek-vl2-tiny",
+    *,
+    captioner: Optional[DeepSeekVL2Captioner] = None, # NOTE: Reuse a preloaded engine if provided
+    caption_model: str = "deepseek-ai/deepseek-vl2-tiny", # NOTE: Back-compatibility; used only when the captioner is None
     gpu_mem: float = 0.7,
     seed: Optional[int] = None,
     prompt: Optional[str] = None,
@@ -146,20 +148,21 @@ def run_caption_pipeline(
     if not md_dir.exists():
         raise FileNotFoundError(f"markdown directory not found under: {output_dir}")
 
-    logger.info("Initializing captioner: %s", caption_model)
-    with quiet.quiet_stdio():
-        captioner = DeepSeekVL2Captioner(
-            CaptionerConfig(
-                model_name=caption_model,
-                gpu_memory_utilization=gpu_mem,
-                seed=seed,
-                # TODO:
-                # Hueristically chosen sizes to ensure valid VL2 input.
-                # May need adjustment for different image distributions.
-                min_side=128,
-                max_side=2048,
+    if captioner is None:
+        logger.info("Initializing captioner: %s", caption_model)
+        with quiet.quiet_stdio():
+            captioner = DeepSeekVL2Captioner(
+                CaptionerConfig(
+                    model_name=caption_model,
+                    gpu_memory_utilization=gpu_mem,
+                    seed=seed,
+                    # TODO:
+                    # Hueristically chosen sizes to ensure valid VL2 input.
+                    # May need adjustment for different image distributions.
+                    min_side=128,
+                    max_side=2048,
+                )
             )
-        )
 
     changed = 0
     for md_file in sorted(md_dir.glob("*.md")):

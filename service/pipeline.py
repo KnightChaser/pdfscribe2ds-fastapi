@@ -59,6 +59,8 @@ async def process_pdf(
     async with _admit():
         # 1. OCR
         try:
+            if engines.ocr is None:
+                raise HTTPException(status_code=500, detail="OCR engine is not initialized")
             def _run_ocr():
                 run_pdf_pipeline(
                     pdf_path=pdf_path,
@@ -72,11 +74,12 @@ async def process_pdf(
 
         # 2. Caption
         try:
+            if engines.vl2 is None:
+                raise HTTPException(status_code=500, detail="VL2 caption engine is not initialized")
             def _run_caption():
                 run_caption_pipeline(
                     output_dir=out_dir,
-                    caption_model=engines.vl2.cfg.model_name,
-                    gpu_mem=engines.vl2.cfg.gpu_memory_utilization,
+                    captioner=engines.vl2,
                     seed=seed,
                     rewrite=rewrite,
                 )
