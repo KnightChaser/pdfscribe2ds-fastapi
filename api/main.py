@@ -47,7 +47,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="pdfscribe2ds-fastapi", 
-        version="0.1.0", 
+        version="1.1.0", 
         lifespan=lifespan,
         description=(
             "Convert PDFs to Markdown with DeepSeek-OCR and optionally caption images "
