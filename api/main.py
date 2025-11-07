@@ -28,6 +28,8 @@ def create_app() -> FastAPI:
                 gpu_mem_vl2=s.gpu_mem_vl2,
                 seed=s.seed,
                 gpu_slots=s.gpu_slots,
+                ocr_device=s.ocr_device,
+                vl2_device=s.vl2_device,
             )
         yield
 

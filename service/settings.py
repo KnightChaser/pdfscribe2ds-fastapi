@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     gpu_mem_ocr: float = 0.70
     gpu_mem_vl2: float = 0.70
 
+    # GPU device pinning
+    ocr_device: str = "0"
+    vl2_device: str = "1"
+
     # Admission control
     # NOTE: Not to overwhelm a limited resource with too many concurrent jobs
     gpu_slots: int = 1  # number of concurrent GPU jobs allowed (1 for single GPU)
