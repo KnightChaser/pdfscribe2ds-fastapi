@@ -38,24 +38,6 @@ def models_status():
         busy=engines_busy()
     )
 
-async def _try_admit(timeout_s: float) -> bool:
-    """
-    Test if we can acquire the GPU admission within the timeout.
-
-    Args:
-        timeout_s (float): Timeout in seconds.
-
-    Returns:
-        bool: True if admission acquired, False if timeout.
-    """
-    e = get_engines()
-    try:
-        await asyncio.wait_for(e.gate.acquire(), timeout=timeout_s)
-        e.gate.release() # immediately release, since it's just a probe
-        return True
-    except asyncio.TimeoutError:
-        return False
-
 @router.post("/process/pdf")
 async def process_pdf_endpoint(
     file: UploadFile = File(...),
