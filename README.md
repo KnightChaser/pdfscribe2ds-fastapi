@@ -14,3 +14,20 @@ uv sync
 uv pip install -U vllm --pre --extra-index-url https://wheels.vllm.ai/nightly --extra-index-url https://download.pytorch.org/whl/cu129 --index-strategy unsafe-best-match
 uv pip install timm
 ```
+
+## Usage
+
+Utilize `uv run` command to execute the FastAPI server. It will automatically load two necessary AI models (`DeepSeek-OCR` and `DeepSeek-VL2-tiny`) on each designated GPU devices.
+
+```sh
+uv run -- uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 1
+```
+
+When the FastAPI service is up, you can try the functionality of the service by sending an example PDF document you want to be processed automatically with `curl` command as follows:
+
+```sh
+curl -f -X POST \
+  -F "file=@./example/investment_report.pdf;type=application/pdf" \
+  "http://localhost:8000/v1/process/pdf?rewrite_mode=append&wait_if_busy=true&timeout_s=60" \
+  -o out.zip
+```
