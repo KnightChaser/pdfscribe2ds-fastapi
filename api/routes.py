@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from caption_pipeline.caption_pipeline import CaptionRewrite
 
@@ -14,6 +14,20 @@ from service.workers import zip_dir
 from api.schemas import HealthResponse, StatusResponse
 
 router = APIRouter()
+
+async def _cancel_on_disconnect(request: Request, cancel_evt: asyncio.Event) -> None:
+    """
+    If the client disconnects, set the cancel event.
+
+    Args:
+        request (Request): The FastAPI request object.
+        cancel_evt (asyncio.Event): The event to set on disconnection.
+    """
+    while not cancel_evt.is_set():
+        if await request.is_disconnected():
+            cancel_evt.set()
+            break
+        await asyncio.sleep(0.25)
 
 @router.get("/health", response_model=HealthResponse)
 def health():
@@ -40,6 +54,7 @@ def models_status():
 
 @router.post("/process/pdf")
 async def process_pdf_endpoint(
+    request: Request,
     file: UploadFile = File(...),
     dpi: int = 200,
     rewrite_mode: str = "append",
@@ -56,6 +71,7 @@ async def process_pdf_endpoint(
     If the GPU is busy, it may wait or reject the request based on parameters.
 
     Args:
+        request (Request): The FastAPI request object.
         file (UploadFile): The uploaded PDF file.
         dpi (int): The DPI to render PDF pages.
         rewrite_mode (str): Caption rewrite mode, either "append" or "replace".
@@ -94,8 +110,24 @@ async def process_pdf_endpoint(
     tmp_root = Path("/tmp/pdfscribe2ds-fastapi")
     tmp_root.mkdir(parents=True, exist_ok=True)
 
-    # Receive the output and archive it into a zip file
-    out_dir = await process_pdf(tmp_root, pdf_bytes, dpi, rewrite, seed)
+    # NOTE: Cancel PDF process job when client disconnects
+    cancel_evt = asyncio.Event()
+    watcher = asyncio.create_task(_cancel_on_disconnect(request, cancel_evt))
+    try:
+        # Receive the output and archive it into a zip file
+        out_dir = await process_pdf(
+            tmp_root=tmp_root, 
+            pdf_bytes=pdf_bytes, 
+            dpi=dpi, 
+            rewrite=rewrite, 
+            seed=seed,
+            cancel_evt=cancel_evt
+        )
+    except asyncio.CancelledError:
+        raise HTTPException(status_code=499, detail="Client closed request.")
+    finally:
+        watcher.cancel()
+
     archive_path = zip_dir(
         src=out_dir, 
         dest_zip_stem=out_dir.parent / "result"

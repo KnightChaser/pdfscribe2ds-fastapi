@@ -1,6 +1,7 @@
 # caption_pipeline/caption_pipeline.py
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from pathlib import Path
@@ -55,6 +56,7 @@ def caption_markdown_file(
     captioner: DeepSeekVL2Captioner,
     prompt_override: Optional[str] = None,
     rewrite: CaptionRewrite = CaptionRewrite.APPEND,
+    cancel_evt: Optional[asyncio.Event] = None,
 ) -> bool:
     """
     Read a single Markdown file, caption each image tag, and rewrite the file in place.
@@ -65,6 +67,7 @@ def caption_markdown_file(
         captioner (DeepSeekVL2Captioner): The captioner instance to use for generating captions.
         prompt_override (Optional[str]): Optional prompt to override the default captioning prompt.
         rewrite (CaptionRewrite): Whether to append or replace captions in the markdown.
+        cancel_evt (Optional[asyncio.Event]): Optional event to signal cancellation.
 
     Returns:
         bool: True if the file was modified, False otherwise.
@@ -79,6 +82,9 @@ def caption_markdown_file(
     captions_cache: Dict[str, str] = {}
 
     for m in matches:
+        if cancel_evt and cancel_evt.is_set():
+            raise asyncio.CancelledError()
+
         # alt = m.group(1)
         rel = m.group(2)
         if rel in captions_cache:
@@ -99,6 +105,8 @@ def caption_markdown_file(
                     )
                 captions_cache[rel] = cap
                 logger.info("Captioned image: %s", img_path)
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             logger.error("Failed to caption image %s: %s", img_path, e)
             continue
@@ -114,14 +122,13 @@ def caption_markdown_file(
             return f"{(alt or 'Image').strip()} (Interpreted and captioned): {cap}"
         # APPEND: keep original + caption
         return f"{m.group(0)}{_render_caption_block(alt, cap)}"
-        
 
     new_text = _IMG_TAG.sub(repl, text)
     if new_text != text:
         md_file.write_text(new_text, encoding="utf-8")
         logger.info("Captioned %s", md_file.name)
         return True
-    return False
+    return False 
 
 def run_caption_pipeline(
     output_dir: Path,
@@ -132,6 +139,7 @@ def run_caption_pipeline(
     seed: Optional[int] = None,
     prompt: Optional[str] = None,
     rewrite: CaptionRewrite = CaptionRewrite.APPEND,
+    cancel_evt: Optional[asyncio.Event] = None,
 ) -> None:
     """
     For a finished OCR run (with images/ and markdown/), caption the images referenced
@@ -143,6 +151,8 @@ def run_caption_pipeline(
         gpu_mem (float): The GPU memory utilization fraction.
         seed (Optional[int]): Optional random seed for reproducibility.
         prompt (Optional[str]): Optional prompt to override the default captioning prompt.
+        rewrite (CaptionRewrite): Whether to append or replace captions in the markdown.
+        cancel_evt (Optional[asyncio.Event]): Optional event to signal cancellation.
     """
     md_dir = output_dir / "markdown"
     if not md_dir.exists():
@@ -166,11 +176,20 @@ def run_caption_pipeline(
 
     changed = 0
     for md_file in sorted(md_dir.glob("*.md")):
+        if cancel_evt and cancel_evt.is_set():
+            raise asyncio.CancelledError()
+
         try:
-            if caption_markdown_file(md_file, captioner, prompt_override=prompt, rewrite=rewrite):
+            if caption_markdown_file(
+                md_file, 
+                captioner, 
+                prompt_override=prompt, 
+                rewrite=rewrite, 
+                cancel_evt=cancel_evt):
                 changed += 1
+        except asyncio.CancelledError:
+            raise
         except Exception:
             logger.exception("Failed to process %s", md_file.name)
 
     logger.info("Caption pipeline finished. %d file(s) updated.", changed)
-

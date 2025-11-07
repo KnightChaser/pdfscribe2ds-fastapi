@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+import shutil
+from typing import Optional
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import HTTPException
@@ -30,6 +32,7 @@ async def process_pdf(
     dpi: int,
     rewrite: CaptionRewrite,
     seed: int | None,
+    cancel_evt: Optional[asyncio.Event] = None,
 ) -> Path:
     """
     Asynchronously process a PDF: OCR + Caption.
@@ -42,6 +45,7 @@ async def process_pdf(
         dpi (int): DPI for OCR processing.
         rewrite (CaptionRewrite): Caption rewriting strategy.
         seed (int | None): Random seed for captioning.
+        cancel_evt (Optional[asyncio.Event]): Optional event to signal cancellation.
     """
     # Set up the directories
     workdir = tmp_root / str(uuid.uuid4())
@@ -56,35 +60,47 @@ async def process_pdf(
     # NOTE:
     # Entire GPU-critical path (OCR -> caption) under one admission lock
     # After the job, the semaphore is released.
-    async with _admit():
-        # 1. OCR
-        try:
-            if engines.ocr is None:
-                raise HTTPException(status_code=500, detail="OCR engine is not initialized")
-            def _run_ocr():
-                run_pdf_pipeline(
-                    pdf_path=pdf_path,
-                    output_dir=out_dir,
-                    ocr_engine=engines.ocr,
-                    dpi=dpi,
-                )
-            await asyncio.to_thread(_run_ocr)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"OCR processing failed: {e!s}")
+    try:
+        async with _admit():
+            # 1. OCR
+            try:
+                if engines.ocr is None:
+                    raise HTTPException(status_code=500, detail="OCR engine is not initialized")
+                def _run_ocr():
+                    run_pdf_pipeline(
+                        pdf_path=pdf_path,
+                        output_dir=out_dir,
+                        ocr_engine=engines.ocr,
+                        dpi=dpi,
+                        cancel_evt=cancel_evt,
+                    )
+                await asyncio.to_thread(_run_ocr)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"OCR processing failed: {e!s}")
 
-        # 2. Caption
+            # 2. Caption
+            try:
+                if engines.vl2 is None:
+                    raise HTTPException(status_code=500, detail="VL2 caption engine is not initialized")
+                def _run_caption():
+                    run_caption_pipeline(
+                        output_dir=out_dir,
+                        captioner=engines.vl2,
+                        seed=seed,
+                        rewrite=rewrite,
+                        cancel_evt=cancel_evt,
+                    )
+                await asyncio.to_thread(_run_caption)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Caption processing failed: {e!s}")
+
+    except asyncio.CancelledError:
+        # Best-effort cleanup of the working directory in case of cancellation
         try:
-            if engines.vl2 is None:
-                raise HTTPException(status_code=500, detail="VL2 caption engine is not initialized")
-            def _run_caption():
-                run_caption_pipeline(
-                    output_dir=out_dir,
-                    captioner=engines.vl2,
-                    seed=seed,
-                    rewrite=rewrite,
-                )
-            await asyncio.to_thread(_run_caption)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Caption processing failed: {e!s}")
+            shutil.rmtree(workdir, ignore_errors=True)
+        finally:
+            pass
+        raise
+
 
     return out_dir

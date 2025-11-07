@@ -1,9 +1,11 @@
 # ocr_pipeline/pipeline.py
 from __future__ import annotations
 
+from typing import List, Optional
 from pathlib import Path
 from typing import List, Optional
 import logging
+import asyncio
 
 from PIL import Image
 
@@ -23,6 +25,7 @@ def run_pdf_pipeline(
     num_processes: Optional[int] = None,
     num_threads: Optional[int] = None,
     ocr_engine: Optional[DeepSeekOCREngine] = None,
+    cancel_evt: Optional[asyncio.Event] = None,
 ) -> None:
     """
     Full PDF -> images -> DeepSeek-OCR -> Markdown pipeline.
@@ -35,6 +38,7 @@ def run_pdf_pipeline(
         num_processes (int, optional): Number of processes for parallel PDF conversion.
         num_threads (int, optional): Number of threads for parallel image saving.
         ocr_engine (DeepSeekOCREngine, optional): Pre-initialized OCR engine to reuse.
+        cancel_evt (asyncio.Event, optional): Event to signal cancellation.
     """
     cfg = PipelineConfig(
         pdf_path=pdf_path,
@@ -55,6 +59,10 @@ def run_pdf_pipeline(
     )
     logger.info("Converted %d pages to images at %s", len(image_paths), images_out_dir)
 
+    # Check for cancellation
+    if cancel_evt and cancel_evt.is_set():
+        raise asyncio.CancelledError()
+
     # 2. Prepare OCR engine
     if ocr_engine is not None:
         ocr = ocr_engine
@@ -62,11 +70,18 @@ def run_pdf_pipeline(
         with quiet.quiet_stdio():
             ocr = DeepSeekOCREngine(model_name=cfg.model_name)
 
-     # 3. Per page processing
+    # 3. Per page processing
     md_out_dir = cfg.output_dir / "markdown"
     md_out_dir.mkdir(parents=True, exist_ok=True)
 
     for img_path in image_paths:
+        # Check for cancellation
+        if cancel_evt and cancel_evt.is_set():
+            raise asyncio.CancelledError()
+
+        # OCR image -> raw markdown
+        # Rewrite markdown with embedded images
+        # Save final markdown file
         try:
             with quiet.quiet_stdio():
                 raw_md = ocr.image_to_markdown(img_path)
@@ -90,6 +105,8 @@ def run_pdf_pipeline(
             md_file.write_text(cleaned_md, encoding="utf-8")
 
             logger.info(f"[OK] page {page_stem} --> {md_file}")
+        except asyncio.CancelledError:
+            raise
         except Exception:
             logger.exception("Failed to process %s; skipping.", img_path.name)
 
