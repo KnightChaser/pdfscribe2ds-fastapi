@@ -11,7 +11,7 @@ from service.model_manager import get_engines, engines_busy, try_admit_now, try_
 from service.pipeline import process_pdf
 from service.workers import zip_dir
 
-from api.schemas import HealthResponse, StatusResponse
+from api.schemas import HealthResponse, StatusResponse, ErrorResponse
 
 router = APIRouter()
 
@@ -29,7 +29,7 @@ async def _cancel_on_disconnect(request: Request, cancel_evt: asyncio.Event) -> 
             break
         await asyncio.sleep(0.25)
 
-@router.get("/health", response_model=HealthResponse)
+@router.get("/health", response_model=HealthResponse, tags=["system"])
 def health():
     """
     Report the health status of the service.
@@ -43,7 +43,7 @@ def health():
         vl2_model=e.vl2.cfg.model_name
     )
 
-@router.get("/models/status", response_model=StatusResponse)
+@router.get("/models/status", response_model=StatusResponse, tags=["system"])
 def models_status():
     e = get_engines()
     return StatusResponse(
@@ -52,7 +52,34 @@ def models_status():
         busy=engines_busy()
     )
 
-@router.post("/process/pdf")
+@router.post(
+    "/process/pdf",
+    tags=["pipeline"],
+    responses={
+        400: {"model": ErrorResponse, "description": "Bad request"},
+        429: {"model": ErrorResponse, "description": "Busy; admission gate full"},
+        500: {"model": ErrorResponse, "description": "Server error during OCR/Caption"},
+        # NOTE:
+        # Non-standard but commonly used by proxies/clients to reflect client aborts:
+        # OpenAPI allows arbitrary codes as strings if you want to surface it.
+        "499": {"model": ErrorResponse, "description": "Client Closed Request"},
+    },
+    openapi_extra={
+        "x-codeSamples": [
+            {
+                "lang": "bash",
+                "label": "curl",
+                "source": (
+                    "curl -f -X POST "
+                    "-F \"file=@./example/investment_report.pdf;type=application/pdf\" "
+                    "\"http://localhost:8000/v1/process/pdf?rewrite_mode=append\" "
+                    "-o out.zip"
+                ),
+            }
+        ]
+    },
+    summary="Process a PDF file to Markdown and captions, return ZIP",
+)
 async def process_pdf_endpoint(
     request: Request,
     file: UploadFile = File(...),

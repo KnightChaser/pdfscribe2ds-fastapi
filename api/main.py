@@ -16,7 +16,7 @@ TAGS_METADATA = [
     },
     {
         "name": "pipeline",
-        "description": "PDF → OCR → Markdown → (optional) VL2 captioning.",
+        "description": "PDF → OCR → Markdown → VL2 captioning.",
     },
 ]
 
